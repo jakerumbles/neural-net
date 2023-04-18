@@ -1,108 +1,111 @@
-extern crate ndarray;
-
 use ndarray::prelude::*;
-use rand::thread_rng;
-use rand_distr::{Distribution, StandardNormal};
-use std::{
-    cell::{Ref, RefCell},
-    rc::Rc,
-};
+use ndarray::Array;
+// use ndarray_rand::rand_distr::Uniform;
+use ndarray_rand::RandomExt;
+use rand_distr::StandardNormal;
 
-enum ActivationFunction {
-    Sigmoid,
-    Tanh,
-    ReLU,
-}
-
-struct Node {
-    weights: Vec<(f32, Option<Rc<RefCell<Node>>>)>,
-    bias: f32,
-    activation_function: ActivationFunction,
-    output: f32,
-    error: f32,
-}
-
-impl Node {
-    fn new(
-        weights: Vec<(f32, Option<Rc<RefCell<Node>>>)>,
-        bias: f32,
-        activation_function: ActivationFunction,
-        output: f32,
-        error: f32,
-    ) -> Node {
-        Node {
-            weights,
-            bias,
-            activation_function,
-            output,
-            error,
-        }
-    }
-}
-
-pub struct NeuralNet {
-    input_nodes: Vec<Rc<RefCell<Node>>>,
-    num_hidden_layers: u32,
-    nodes_per_layer: u8,
+struct NeuralNet {
+    layers: Vec<Layer>,
 }
 
 impl NeuralNet {
-    pub fn new(num_inputs: u32, num_hidden_layers: u32, nodes_per_layer: u8) -> Self {
-        let mut input_nodes: Vec<Rc<RefCell<Node>>> = vec![];
+    fn new(
+        num_inputs: usize,
+        num_outputs: usize,
+        num_hidden_layers: usize,
+        num_nodes_per_layer: usize,
+    ) -> Self {
+        let mut layers: Vec<Layer> = vec![];
+        // Create the first layer with the actual number of features from the dataset as the number of inputs
+        layers.push(Layer::new(num_inputs, num_nodes_per_layer));
 
-        // Create input nodes
-        for _ in 0..num_inputs {
-            let node = Node::new(
-                vec![(1.0, None); nodes_per_layer as usize],
-                0.0,
-                ActivationFunction::ReLU,
-                1.0,
-                0.0,
-            );
-
-            input_nodes.push(Rc::new(RefCell::new(node)));
+        for _ in 1..num_hidden_layers {
+            // Create the rest of the hidden layers with the input as the number of nodes in the previous layer
+            layers.push(Layer::new(num_nodes_per_layer, num_nodes_per_layer));
         }
 
-        // Create hidden layers
+        // Create the output layer with the number of nodes in the previous layer as the number of inputs
+        layers.push(Layer::new(num_nodes_per_layer, num_outputs));
+        NeuralNet { layers }
+    }
 
-        Self {
-            input_nodes,
-            num_hidden_layers,
-            nodes_per_layer,
+    // fn feed_forward(&mut self, input: &Array<f64, Ix1>) -> &Array<f64, Ix1> {
+    //     let mut output = input;
+    //     for layer in &mut self.layers {
+    //         output = layer.forward(output);
+    //     }
+    //     output
+    // }
+}
+
+struct Layer {
+    weights: Array<f64, Ix2>,
+    biases: Array<f64, Ix1>,
+    output: Array<f64, Ix1>,
+}
+
+impl Layer {
+    fn new(num_inputs: usize, num_outputs: usize) -> Self {
+        let mut weights = Array::random((num_inputs, num_outputs), StandardNormal);
+        let mut biases = Array::random((num_outputs,), StandardNormal);
+        let mut output = Array::zeros((num_outputs,));
+        Layer {
+            weights,
+            biases,
+            output,
         }
+    }
+
+    /// The layer processes the input data and returns the output. Specifically, it is the sum of the product
+    /// of the input and the weights, plus the biases.
+    fn forward(&mut self, input: &Array<f64, Ix1>) -> &Array<f64, Ix1> {
+        self.output = input.dot(&self.weights) + &self.biases;
+        &self.output
+
+        // ReLU activation function
+        // output.mapv(|x| x.max(0.0))
     }
 }
 
-// Calculate the sum of squared residuals. This is how far off the network is from the target, the actual value in reality. The lower the better.
-fn calculate_ssr(observed: f32, predicted: f32) -> f32 {
-    (observed - predicted).powi(2)
+struct Relu {
+    output: Array<f64, Ix1>,
 }
 
-// Get a random number from a standard normal distribution, with a mean of 0 and a standard deviation of 1.
-fn rand_normal_dist() -> f32 {
-    let mut rng = thread_rng();
-    let x = StandardNormal.sample(&mut rng);
-    println!("Random value from standard normal distribution: {}", x);
-    x
+impl Relu {
+    fn new() -> Self {
+        Relu {
+            output: Array::zeros((1,)),
+        }
+    }
+
+    /// Takes weighted and biased neuron outputs and applies the ReLU activation function to them.
+    fn forward(&mut self, input: &Array<f64, Ix1>) -> &Array<f64, Ix1> {
+        self.output = input.mapv(|x| x.max(0.0));
+        &self.output
+    }
 }
+
+// TODO: Implement softmax activation function
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn setup() {
-        let net = NeuralNet::new(1, 1, 2);
+    fn create_and_feed_forward() {
+        let input = array![1.0, 2.0];
 
-        let a = array![[1, 2, 3, 4], [5, 6, 7, 8]];
-        assert_eq!(a.ndim(), 2); // get the number of dimensions of array a
-        assert_eq!(a.len(), 8); // get the number of elements in array a
-        assert_eq!(a.shape(), [2, 4]); // get the shape of array a
-        assert_eq!(a.is_empty(), false); // check if the array has zero elements
+        let mut layer1 = Layer::new(2, 3);
+        let mut activation1 = Relu::new();
 
-        let b = array![1, 2, 3, 4,];
-        let c = array![1, 2, 3, 4,];
-        let d = b.dot(&c);
-        assert_eq!(d, 30);
+        println!("Layer 1 weights: {}\n", layer1.weights);
+        println!("Layer 1 biases: {}\n", layer1.biases);
+        println!("Layer 1 output before:\n {}", layer1.output);
+
+        layer1.forward(&input);
+        println!("Layer 1 output after:\n {}", layer1.output);
+
+        activation1.forward(&layer1.output);
+        println!("Relu output after activation:\n {}", activation1.output);
     }
 }
